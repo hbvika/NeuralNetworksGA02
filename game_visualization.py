@@ -42,7 +42,7 @@ agent = DeepQLearningAgent(board_size=board_size, frames=frames,
 for iteration in iteration_list:
     agent.load_model(file_path='models/{:s}'.format(version), iteration=iteration)
     
-    for i in range(5):
+    for i in range(1):
         visualize_game(env, agent,
             path='images/game_visual_{:s}_{:d}_14_ob_{:d}.mp4'.format(version, iteration, i),
             debug=False, animate=True, fps=12)
