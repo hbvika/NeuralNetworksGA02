@@ -3,9 +3,9 @@
 
 import numpy as np
 from agent import DeepQLearningAgent, PolicyGradientAgent, \
-        AdvantageActorCriticAgent, HamiltonianCycleAgent, BreadthFirstSearchAgent
+        AdvantageActorCriticAgent, HamiltonianCycleAgent, BreadthFirstSearchAgent, DeepQLearningAgent_torch
 from game_environment import Snake, SnakeNumpy
-from utils import visualize_game
+from utils import visualize_game_torch
 import json
 # import keras.backend as K
 
@@ -21,7 +21,6 @@ with open('model_config/{:s}.json'.format(version), 'r') as f:
     n_actions = m['n_actions']
     obstacles = bool(m['obstacles'])
 
-iteration_list = [163500]
 max_time_limit = 398
 
 # setup the environment
@@ -30,19 +29,14 @@ env = Snake(board_size=board_size, frames=frames, max_time_limit=max_time_limit,
 s = env.reset()
 n_actions = env.get_num_actions()
 
-# setup the agent
-# K.clear_session()
-agent = DeepQLearningAgent(board_size=board_size, frames=frames, 
+agent = DeepQLearningAgent_torch(board_size=board_size, frames=frames, 
                            n_actions=n_actions, buffer_size=10, version=version)
-# agent = PolicyGradientAgent(board_size=board_size, frames=frames, n_actions=n_actions, buffer_size=10)
-# agent = AdvantageActorCriticAgent(board_size=board_size, frames=frames, n_actions=n_actions, buffer_size=10)
-# agent = HamiltonianCycleAgent(board_size=board_size, frames=frames, n_actions=n_actions, buffer_size=10)
-# agent = BreadthFirstSearchAgent(board_size=board_size, frames=frames, n_actions=n_actions, buffer_size=10)
 
-for iteration in iteration_list:
-    agent.load_model(file_path='models/{:s}'.format(version), iteration=iteration)
+models_to_load = ['torch_iter_1000', 'torch_iter_50000', 'torch_iter_100000', 'torch_iter_200000', 'torch_iter_400000']
+for model in models_to_load:
+    agent.load_model(file_path='models/{:s}'.format(model))
     
-    for i in range(1):
-        visualize_game(env, agent,
-            path='images/game_visual_{:s}_{:d}_14_ob_{:d}.mp4'.format(version, iteration, i),
+    for i in range(3):
+        visualize_game_torch(env, agent,
+            path='images/game_visual_{:s}_{:s}.mp4'.format(model,str(i)),
             debug=False, animate=True, fps=12)

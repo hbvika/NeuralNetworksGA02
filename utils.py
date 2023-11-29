@@ -201,6 +201,7 @@ def play_game2(env, agent, n_actions, n_games=100, epsilon=0.01, record=True,
     while(not frame_mode and not done.all()) or \
          (frame_mode and total_games is None and frames < total_frames) or\
          (frame_mode and total_games is not None and games < total_games):
+        
         legal_moves = env.get_legal_moves()
         if(np.random.random() <= epsilon):
             # use epsilon greedy policy to get next action
@@ -262,6 +263,84 @@ def play_game2(env, agent, n_actions, n_games=100, epsilon=0.01, record=True,
     
     return rewards, lengths, games
 
+def play_game_torch(env, agent, n_actions, n_games=100, epsilon=0.01, record=True,
+              verbose=False, reset_seed=False, sample_actions=False,
+              reward_type='current', frame_mode=False, total_frames=10,
+              total_games=None, stateful=False, debug=False):
+    rewards = 0 # to keep track of total reward across games
+    lengths = 0 # to keep track of total length across all games
+    if(reset_seed):
+        np.random.seed(42)
+    s = env.reset(stateful)
+    # this done is just for first run of the while loop
+    done = np.zeros((1,), dtype=np.uint8)
+    # the following is useful for discounted rewards as not known in advance
+    s_list, action_list, reward_list, next_s_list, done_list, legal_moves_list \
+                = [], [], [], [], [], []
+    frames, games = 0, 0
+
+    '''3 conditions to check, 
+    1) if not using frame mode then all games should not have ended
+    2) if using frame mode and total games is not provided, then fames
+       playes should be less than total frames asked for
+    3) if using frame mode and total games is provded, then total games
+       playes < total games asked for
+    ''' 
+    while(not frame_mode and not done.all()) or \
+         (frame_mode and total_games is None and frames < total_frames) or\
+         (frame_mode and total_games is not None and games < total_games):
+        legal_moves = env.get_legal_moves()
+        s_transformed = agent.preprocess_input(s) #Needed to reshape inputs for torch
+        if(np.random.random() <= epsilon):
+            # use epsilon greedy policy to get next action
+            # action = np.random.choice(n_actions, n_games)
+            action = np.argmax(np.where(legal_moves>0, 
+                        np.random.random((n_games, n_actions)),-1), axis=1)
+        else:
+            # get action with best q value
+            action = agent.move(s_transformed, legal_moves, env.get_values())
+        # take 1 step in env across all games 
+        next_s, reward, done, info, next_legal_moves = env.step(action)
+
+        if(record):
+            # handle (info['termination_reason'] != 'time_up') later
+            if(reward_type == 'current'):
+                agent.add_to_buffer(s, action, reward, next_s, done, 
+                                    next_legal_moves)
+            elif(reward_type == 'discounted_future'):
+                # add everything later to the buffer
+                s_list.append(s.copy())
+                action_list.append(action)
+                reward_list.append(reward)
+                next_s_list.append(next_s.copy())
+                done_list.append(done)
+                legal_moves_list.append(next_legal_moves)
+            else:
+                assert reward_type in ['current', 'discounted_future'], \
+                        'reward type not understood !'
+        s = next_s.copy()
+        rewards += np.dot(done, info['cumul_rewards'])
+        frames += n_games
+        games += done.sum()
+        # get only lengths where game ended
+        lengths += np.dot(done, info['length'])
+
+    # if using future discounted rewards, then add everything to buffer here
+    if(record and reward_type == 'discounted_future'):
+        reward_list = calculate_discounted_rewards(reward_list, agent.get_gamma())
+        for i in range(len(reward_list)):
+            agent.add_to_buffer(s_list[i], action_list[i], reward_list[i],\
+                                next_s_list[i], done_list[i], legal_moves_list[i])
+    
+    # since not frame mode, calculate lenghts at the end to avoid
+    # double counting 
+    if(not frame_mode):
+        lengths = np.dot(done, info['length'])
+        rewards = np.dot(done, info['cumul_rewards'])
+    
+    return rewards, lengths, games
+
+
 def visualize_game(env, agent, path='images/game_visual.png', debug=False,
                     animate=False, fps=10):
     print('Starting Visualization')
@@ -279,6 +358,65 @@ def visualize_game(env, agent, path='images/game_visual.png', debug=False,
         a = agent.move(s, legal_moves, env.get_values())
         next_s, r, done, info, _ = env.step(a)
         qvalues.append(agent._get_model_outputs(s)[0])
+        food_count.append(info['food'])
+        game_images.append([next_s[:,:,0], info['time']])
+        s = next_s.copy()
+        if(debug):
+            print(info['time'], qvalues[-1], a, r, info['food'], done, legal_moves)
+    qvalues.append([0] * env.get_num_actions())
+    food_count.append(food_count[-1])
+    print('Game ran for {:d} frames'.format(len(game_images)))
+    # append a few static frames in the end for pause effect
+    for _ in range(5):
+        qvalues.append(qvalues[-1])
+        food_count.append(food_count[-1])
+        game_images.append(game_images[-1])
+    # plot the game
+    if(animation):
+        fig, axs = plt.subplots(1, 1,
+                        figsize=(board_size//2 + 1,board_size//2 + 1))
+        anim = animation.FuncAnimation(fig, anim_frames_func,
+                              frames=game_images,
+                              blit=False, interval=10,
+                              repeat=True, init_func=None,
+                              fargs=(axs, color_map, food_count, qvalues))
+        # anim.save(path, writer='imagemagick', fps=5) # too much memory intensive
+        anim.save(path, writer=animation.writers['ffmpeg'](fps=fps, metadata=dict(artist='Me'), bitrate=1800))
+    else:
+        ncols = 5
+        nrows = len(game_images)//ncols + (1 if len(game_images)%ncols > 0 else 0)
+        fig, axs = plt.subplots(nrows, ncols,
+                    figsize=(board_size*ncols, board_size*nrows), squeeze=False)
+        for i in range(nrows):
+            for j in range(ncols):
+                idx = i*ncols+j
+                if(idx < len(game_images)):
+                    # plot the individual small squares in the frame
+                    axs[i, j] = anim_frames_func(game_images[idx], axs[i, j],
+                                    color_map, food_count, qvalues)
+                else:
+                    fig.delaxes(axs[i, j])
+        fig.savefig(path, bbox_inches='tight')
+
+def visualize_game_torch(env, agent, path='images/game_visual.png', debug=False,
+                    animate=False, fps=10):
+    print('Starting Visualization')
+    game_images = []
+    qvalues = []
+    food_count = []
+    color_map = {0: 'lightgray', 1: 'g', 2: 'lightgreen', 3: 'r', 4: 'darkgray'}
+    s = env.reset()
+    board_size = env.get_board_size()
+    game_images.append([s[:,:,0], 0])
+    done = 0
+    while(not done):
+        # print('frame no ', len(game_images))
+        legal_moves = env.get_legal_moves()
+        s_transformed = agent.preprocess_input(s)
+        a_tensor = agent.move(s_transformed, legal_moves, env.get_values())
+        a = a_tensor.item()
+        next_s, r, done, info, _ = env.step(a)
+        qvalues.append(agent.get_model_outputs(s_transformed)[0])
         food_count.append(info['food'])
         game_images.append([next_s[:,:,0], info['time']])
         s = next_s.copy()

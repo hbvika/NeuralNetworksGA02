@@ -14,6 +14,12 @@ import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Input, Conv2D, Flatten, Dense, Softmax, MaxPool2D
 from tensorflow.keras import Model
 from tensorflow.keras.regularizers import l2
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+
+
 # from tensorflow.keras.losses import Huber
 
 def huber_loss(y_true, y_pred, delta=1):
@@ -129,6 +135,7 @@ class Agent():
         self._board_grid = np.arange(0, self._board_size**2)\
                              .reshape(self._board_size, -1)
         self._version = version
+        self.index = 0
 
     def get_gamma(self):
         """Returns the agent's gamma value
@@ -257,6 +264,170 @@ class Agent():
             point value corresponding to the row and col values
         """
         return row*self._board_size + col
+
+class DQN(nn.Module):
+    def __init__(self, board_size, frames, n_actions):
+        super(DQN, self).__init__()
+        self.conv1 = nn.Conv2d(frames, 16, kernel_size=3)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=6)
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(64, 64)  
+        self.out = nn.Linear(64, n_actions)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = self.flatten(x)
+
+        x = F.relu(self.fc1(x))
+        x = self.out(x)
+        return x
+
+
+class DeepQLearningAgent_torch(Agent):
+
+    def __init__(self, board_size=10, frames=4, n_actions=3, gamma=0.99, learning_rate=0.0005, buffer_size=10000, use_target_net=True, version=''):
+        super().__init__(board_size, frames, buffer_size, gamma, n_actions, use_target_net, version)
+        self.model = DQN(board_size, frames, n_actions)
+        self.target_net = DQN(board_size, frames, n_actions)
+        self.optimizer = optim.RMSprop(self.model.parameters(), lr=learning_rate)
+        self.gamma = gamma
+        self.n_actions = n_actions
+        self.loss_fn = nn.MSELoss()
+
+    def select_action(self, state):
+        # Convert state to tensor and get action values from model
+        state_tensor = torch.tensor(state, dtype=torch.float32)
+        with torch.no_grad():
+            action_values = self.model(state_tensor.unsqueeze(0))
+        return torch.argmax(action_values, dim=1).item()
+    
+    def move(self, state, legal_moves, env_values=None):
+        # Convert state to tensor
+        state_tensor = torch.tensor(state, dtype=torch.float32)
+
+        # Get action values from the model
+        with torch.no_grad():
+            action_values = self.model(state_tensor)
+
+        # Loop through each game's actions and legal moves
+        for i in range(action_values.shape[0]):
+            # Apply mask for illegal moves
+            action_values[i, ~legal_moves[i].astype(bool)] = -float('inf')
+
+        # Select the action with the highest value for each game
+        actions = torch.argmax(action_values, dim=1)
+
+        return actions
+
+    def update_target_net(self):
+        self.target_net.load_state_dict(self.model.state_dict())
+    
+    def save_model(self, file_path, iteration=None):
+        if iteration is not None:
+            file_path = f"{file_path}_iter_{iteration}"
+        # Save the model
+        torch.save(self.model.state_dict(), file_path)
+
+    def load_model(self, file_path):
+        self.model.load_state_dict(torch.load(file_path))
+        self.model.eval()  # Set the model to evaluation mode
+
+    def preprocess_input(self, state):
+        # Check if state is already a tensor
+        if not isinstance(state, torch.Tensor):
+            # Convert to tensor if it's not already
+            processed_state = state.astype(np.float32) / 4.0
+            # Check if state is a single image (height x width x channels)
+            # If so, reshape it to (1 x height x width x channels)
+            if processed_state.ndim == 3:
+                processed_state = processed_state[np.newaxis, ...]
+            # Transpose to PyTorch format
+            processed_state = np.transpose(processed_state, (0, 3, 1, 2))
+            processed_state = torch.tensor(processed_state, dtype=torch.float32)
+        else:
+            # If it's already a tensor, use it directly
+            processed_state = state
+
+        return processed_state
+
+    
+    def get_model_outputs(self, state, model=None):
+        if model is None:
+            model = self.model
+        processed_state = self.preprocess_input(state)
+        with torch.no_grad():
+            action_values = model(processed_state)
+        return action_values
+
+    def get_action_proba(self, state):
+        action_values = self.get_model_outputs(state)
+        action_probabilities = torch.softmax(action_values, dim=1)
+        return action_probabilities
+
+    def train_step(self, batch, reward_clip=False, print_info_for_debug=False):
+        # Unpack the batch and convert to tensors
+        states, actions, rewards, next_states, dones, legal_moves = batch
+
+        # Convert everything to PyTorch tensors with preprocessing
+        states = self.preprocess_input(states)
+        next_states = self.preprocess_input(next_states)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        dones = torch.tensor(dones, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.long)
+
+        if actions.dim() > 1:
+            actions = torch.argmax(actions, dim=1)
+        actions = actions.unsqueeze(-1)
+
+        if reward_clip:
+            rewards = rewards.sign()
+
+        # Compute current Q values
+        current_q_values = self.model(states).gather(1, actions).squeeze(-1)
+        # Compute next Q values using target network
+        next_q_values = self.target_net(next_states).max(1)[0]
+        # Compute expected Q values
+        expected_q_values = rewards.squeeze(-1) + self.gamma * next_q_values * (1 - dones.squeeze(-1))
+
+        # Compute loss
+        loss = nn.functional.smooth_l1_loss(current_q_values, expected_q_values)
+
+        # Backpropagation
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        if self.index % 1000 == 0 and print_info_for_debug: 
+            print(f"Sample states: {states[:2]}")
+            print(f"Sample actions: {actions[:2]}")
+            print(f"Sample rewards: {rewards[:2]}")
+            print(f"Sample next states: {next_states[:2]}")
+            print(f"Sample dones: {dones[:2]}")
+            print(f"Sample current Q-values: {current_q_values[:2]}")
+            print(f"Sample expected Q-values: {expected_q_values[:2]}")
+
+            print(f"States Shape: {states.shape}")
+            print(f"Actions Shape: {actions.shape}")
+            print(f"Rewards Shape: {rewards.shape}")
+            print(f"Next States Shape: {next_states.shape}")
+            print(f"Dones Shape: {dones.shape}")
+            print(f"Current Q-Values Shape: {current_q_values.shape}")
+            print(f"Expected Q-Values Shape: {expected_q_values.shape}")
+
+        return loss
+
+    def train_agent(self, batch_size=1, num_games=1, reward_clip=False, print_info_for_debug=False):
+        batch = self._buffer.sample(batch_size)
+        loss = self.train_step(batch, reward_clip=reward_clip, print_info_for_debug=print_info_for_debug)
+        
+        self.index += 1 # counter used for printing debug info
+        return loss.item()
+
+    def update_target_net(self):
+        self.target_net.load_state_dict(self.model.state_dict())
 
 class DeepQLearningAgent(Agent):
     """This agent learns the game via Q learning

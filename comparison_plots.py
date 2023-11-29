@@ -1,96 +1,31 @@
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
-df_base = pd.read_csv('model_logs/v15.1.csv')
-df_batch = pd.read_csv('model_logs/v15.4.csv')
-df_super = pd.read_csv('model_logs/v15.2.csv')
-df_reward = pd.read_csv('model_logs/v15.3.csv')
+# Load the csv files
+df_torch128 = pd.read_csv('model_logs/torch128.csv')
 
-df_base['length_mean_ma'] = df_base['length_mean'].rolling(10).mean()
-df_batch['length_mean_ma'] = df_batch['length_mean'].rolling(10).mean()
-df_super['length_mean_ma'] = df_super['length_mean'].rolling(10).mean()
-df_reward['length_mean_ma'] = df_reward['length_mean'].rolling(10).mean()
-df_base['loss_ma'] = df_base['loss'].rolling(10).mean()
-df_batch['loss_ma'] = df_batch['loss'].rolling(10).mean()
-df_super['loss_ma'] = df_super['loss'].rolling(10).mean()
-df_reward['loss_ma'] = df_reward['loss'].rolling(10).mean()
+# Calculate the moving averages
+df_torch128['length_mean_ma'] = df_torch128['length_mean'].rolling(20).mean()
+df_torch128['loss_ma'] = df_torch128['loss'].rolling(20).mean()
 
-fig, axs = plt.subplots(1, 1, figsize=(8, 8))
-axs.set_title('Snake Mean Length vs Training Batch Size')
+# Plotting
+fig, axs = plt.subplots(2, 1, figsize=(10, 12))
 
-axs.plot(df_base['iteration'][:200], df_base['length_mean'][:200], 
-        label='Batch Size 64', color='skyblue')
-axs.plot(df_batch['iteration'][:200], df_batch['length_mean'][:200], 
-        label='Batch Size 128', color='bisque')
+# Length Mean Plot
+axs[0].set_title('Snake Mean Length vs Iteration (Batch Size 128)')
+axs[0].plot(df_torch128['iteration'], df_torch128['length_mean'], label='Length Mean', color='skyblue')
+axs[0].plot(df_torch128['iteration'], df_torch128['length_mean_ma'], label='Length Mean Moving Average', color='blue')
+axs[0].set_ylabel('Mean Length')
+axs[0].set_xlabel('Iteration')
+axs[0].legend()
 
-axs.plot(df_base['iteration'][9:200], df_base['length_mean_ma'][9:200], 
-        label='Batch Size 64 Moving Average', color='blue')
-axs.plot(df_batch['iteration'][9:200], df_batch['length_mean_ma'][9:200], 
-        label='Batch Size 128 Moving Average', color='red')
+# Loss Plot
+axs[1].set_title('Loss vs Iteration (Batch Size 128)')
+axs[1].plot(df_torch128['iteration'], df_torch128['loss'], label='Loss', color='orange')
+axs[1].plot(df_torch128['iteration'], df_torch128['loss_ma'], label='Loss Moving Average', color='red')
+axs[1].set_ylabel('Loss')
+axs[1].set_xlabel('Iteration')
+axs[1].legend()
 
-axs.set_ylabel('Mean Length')
-axs.set_xlabel('Iteration')
-
-plt.legend()
-plt.show()
-
-
-fig, axs = plt.subplots(1, 1, figsize=(8, 8))
-axs.set_title('Snake Mean Length vs PreTraining')
-
-axs.plot(df_base['iteration'][:100], df_base['length_mean'][:100], 
-        label='DQN', color='skyblue')
-axs.plot(df_super['iteration'][:100], df_super['length_mean'][:100], 
-        label='DQN PreTrained', color='bisque')
-
-axs.plot(df_base['iteration'][9:100], df_base['length_mean_ma'][9:100], 
-        label='DQN Moving Average', color='blue')
-axs.plot(df_super['iteration'][9:100], df_super['length_mean_ma'][9:100], 
-        label='DQN PreTrained Moving Average', color='red')
-
-axs.set_ylabel('Mean Length')
-axs.set_xlabel('Iteration')
-
-plt.legend()
-plt.show()
-
-
-fig, axs = plt.subplots(1, 1, figsize=(8, 8))
-axs.set_title('Snake Mean Length vs Reward Type')
-
-axs.plot(df_base['iteration'][:100], df_base['length_mean'][:100], 
-        label='Static Reward', color='skyblue')
-axs.plot(df_reward['iteration'][:100], df_reward['length_mean'][:100], 
-        label='Length Dependent Reward', color='bisque')
-
-axs.plot(df_base['iteration'][9:100], df_base['length_mean_ma'][9:100], 
-        label='Static Reward Moving Average', color='blue')
-axs.plot(df_reward['iteration'][9:100], df_reward['length_mean_ma'][9:100], 
-        label='Length Dependent Reward Moving Average', color='red')
-
-axs.set_ylabel('Mean Length')
-axs.set_xlabel('Iteration')
-
-plt.legend()
-plt.show()
-
-
-fig, axs = plt.subplots(1, 1, figsize=(8, 8))
-axs.set_title('Snake Mean Length vs Reward Type')
-
-axs.plot(df_base['iteration'][:100], df_base['loss'][:100], 
-        label='Static Reward', color='skyblue')
-axs.plot(df_reward['iteration'][:100], df_reward['loss'][:100], 
-        label='Length Dependent Reward', color='bisque')
-
-axs.plot(df_base['iteration'][9:100], df_base['loss_ma'][9:100], 
-        label='Static Reward Moving Average', color='blue')
-axs.plot(df_reward['iteration'][9:100], df_reward['loss_ma'][9:100], 
-        label='Length Dependent Reward Moving Average', color='red')
-
-axs.set_ylabel('Mean Length')
-axs.set_xlabel('Iteration')
-
-plt.legend()
+plt.tight_layout()
 plt.show()
