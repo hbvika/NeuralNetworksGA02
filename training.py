@@ -10,7 +10,7 @@ from tqdm import tqdm
 from collections import deque
 import pandas as pd
 import time
-from utils import play_game, play_game2, play_game_torch
+from utils import play_game, play_game2
 from game_environment import Snake, SnakeNumpy
 import tensorflow as tf
 from agent import DeepQLearningAgent, PolicyGradientAgent,\
@@ -44,19 +44,6 @@ batch_size = 128
 # setup the agent
 agent = DeepQLearningAgent_torch(board_size=board_size, frames=frames, n_actions=n_actions, gamma=0.99, learning_rate=0.001)
 
-
-model_to_load = 'torch_iter_400000'  # Define the model name to load
-model_path = f'models/{model_to_load}'  # Construct the file path
-model_loaded = False
-# Load the model if it exists
-try:
-    agent.load_model(model_path)
-    print(f"Model loaded successfully from {model_path}")
-    model_loaded = True
-
-except FileNotFoundError:
-    print(f"No model found at {model_path}, starting training from scratch.")
-
 if(isinstance(agent, DeepQLearningAgent_torch)):
     agent_type = 'DeepQLearningAgent_torch' 
 
@@ -70,29 +57,25 @@ if(agent_type in ['DeepQLearningAgent_torch']):
     sample_actions = False
     n_games_training = 8*16
     decay = 0.97
-    if model_loaded:
-        epsilon = 0.01 #
 
-# use only for DeepQLearningAgent
-if(agent_type in ['DeepQLearningAgent_torch']):
 
-    # setup the environment
-    games = 512
-    env = SnakeNumpy(board_size=board_size, frames=frames, 
-                max_time_limit=max_time_limit, games=games,
-                frame_mode=True, obstacles=obstacles, version=version)
-    ct = time.time()
-    _ = play_game_torch(env, agent, n_actions, n_games=games, record=True,
-                    epsilon=epsilon, verbose=True, reset_seed=False,
-                    frame_mode=True, total_frames=games*64)
-    print('Playing {:d} frames took {:.2f}s'.format(games*64, time.time()-ct))
+# setup the environment
+games = 512
+env = SnakeNumpy(board_size=board_size, frames=frames, 
+            max_time_limit=max_time_limit, games=games,
+            frame_mode=True, obstacles=obstacles, version=version)
+ct = time.time()
+_ = play_game2(env, agent, n_actions, n_games=games, record=True,
+                epsilon=epsilon, verbose=True, reset_seed=False,
+                frame_mode=True, total_frames=games*64)
+print('Playing {:d} frames took {:.2f}s'.format(games*64, time.time()-ct))
 
 env = SnakeNumpy(board_size=board_size, frames=frames, 
-            max_time_limit=max_time_limit, games=n_games_training,
-            frame_mode=True, obstacles=obstacles, version=version)
+        max_time_limit=max_time_limit, games=n_games_training,
+        frame_mode=True, obstacles=obstacles, version=version)
 env2 = SnakeNumpy(board_size=board_size, frames=frames, 
-            max_time_limit=max_time_limit, games=games_eval,
-            frame_mode=True, obstacles=obstacles, version=version)
+        max_time_limit=max_time_limit, games=games_eval,
+        frame_mode=True, obstacles=obstacles, version=version)
 
 
 
@@ -102,7 +85,7 @@ model_logs = {'iteration':[], 'reward_mean':[],
 for index in tqdm(range(episodes)):
     if(agent_type in ['DeepQLearningAgent', 'DeepQLearningAgent_torch']):
         # make small changes to the buffer and slowly train
-        _, _, _ = play_game_torch(env, agent, n_actions, epsilon=epsilon,
+        _, _, _ = play_game2(env, agent, n_actions, epsilon=epsilon,
                        n_games=n_games_training, record=True,
                        sample_actions=sample_actions, reward_type=reward_type,
                        frame_mode=True, total_frames=n_games_training, 
@@ -114,7 +97,7 @@ for index in tqdm(range(episodes)):
     if((index+1)%log_frequency == 0):
         # keep track of agent rewards_history
         current_rewards, current_lengths, current_games = \
-                    play_game_torch(env2, agent, n_actions, n_games=games_eval, epsilon=-1,
+                    play_game2(env2, agent, n_actions, n_games=games_eval, epsilon=-1,
                                record=False, sample_actions=False, frame_mode=True, 
                                total_frames=-1, total_games=games_eval)
         

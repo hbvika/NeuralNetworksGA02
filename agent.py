@@ -292,48 +292,10 @@ class DeepQLearningAgent_torch(Agent):
         super().__init__(board_size, frames, buffer_size, gamma, n_actions, use_target_net, version)
         self.model = DQN(board_size, frames, n_actions)
         self.target_net = DQN(board_size, frames, n_actions)
-        self.optimizer = optim.RMSprop(self.model.parameters(), lr=learning_rate)
+        self.optimizer = optim.RMSprop(self.model.parameters(), lr=learning_rate)  # Same as Tensforlow -also tried Adam
         self.gamma = gamma
         self.n_actions = n_actions
         self.loss_fn = nn.MSELoss()
-
-    def select_action(self, state):
-        # Convert state to tensor and get action values from model
-        state_tensor = torch.tensor(state, dtype=torch.float32)
-        with torch.no_grad():
-            action_values = self.model(state_tensor.unsqueeze(0))
-        return torch.argmax(action_values, dim=1).item()
-    
-    def move(self, state, legal_moves, env_values=None):
-        # Convert state to tensor
-        state_tensor = torch.tensor(state, dtype=torch.float32)
-
-        # Get action values from the model
-        with torch.no_grad():
-            action_values = self.model(state_tensor)
-
-        # Loop through each game's actions and legal moves
-        for i in range(action_values.shape[0]):
-            # Apply mask for illegal moves
-            action_values[i, ~legal_moves[i].astype(bool)] = -float('inf')
-
-        # Select the action with the highest value for each game
-        actions = torch.argmax(action_values, dim=1)
-
-        return actions
-
-    def update_target_net(self):
-        self.target_net.load_state_dict(self.model.state_dict())
-    
-    def save_model(self, file_path, iteration=None):
-        if iteration is not None:
-            file_path = f"{file_path}_iter_{iteration}"
-        # Save the model
-        torch.save(self.model.state_dict(), file_path)
-
-    def load_model(self, file_path):
-        self.model.load_state_dict(torch.load(file_path))
-        self.model.eval()  # Set the model to evaluation mode
 
     def preprocess_input(self, state):
         # Check if state is already a tensor
@@ -353,6 +315,35 @@ class DeepQLearningAgent_torch(Agent):
 
         return processed_state
 
+
+    def select_action(self, state):
+        # Convert state to tensor and get action values from model
+        state_tensor = self.preprocess_input(state)
+
+        with torch.no_grad():
+            action_values = self.model(state_tensor.unsqueeze(0))
+        return torch.argmax(action_values, dim=1).item()
+    
+    def move(self, state, legal_moves, env_values=None):
+        # Convert state to tensor
+        state_tensor = self.preprocess_input(state)
+
+        # Get action values from the model
+        with torch.no_grad():
+            action_values = self.model(state_tensor)
+
+        # Loop through each game's actions and legal moves
+        for i in range(action_values.shape[0]):
+            # Apply mask for illegal moves
+            action_values[i, ~legal_moves[i].astype(bool)] = -float('inf')
+
+        # Select the action with the highest value for each game
+        actions = torch.argmax(action_values, dim=1)
+
+        return actions
+
+    def update_target_net(self):
+        self.target_net.load_state_dict(self.model.state_dict())
     
     def get_model_outputs(self, state, model=None):
         if model is None:
@@ -361,11 +352,6 @@ class DeepQLearningAgent_torch(Agent):
         with torch.no_grad():
             action_values = model(processed_state)
         return action_values
-
-    def get_action_proba(self, state):
-        action_values = self.get_model_outputs(state)
-        action_probabilities = torch.softmax(action_values, dim=1)
-        return action_probabilities
 
     def train_step(self, batch, reward_clip=False, print_info_for_debug=False):
         # Unpack the batch and convert to tensors
@@ -393,7 +379,7 @@ class DeepQLearningAgent_torch(Agent):
         expected_q_values = rewards.squeeze(-1) + self.gamma * next_q_values * (1 - dones.squeeze(-1))
 
         # Compute loss
-        loss = nn.functional.smooth_l1_loss(current_q_values, expected_q_values)
+        loss = self.loss_fn(current_q_values, expected_q_values)
 
         # Backpropagation
         self.optimizer.zero_grad()
@@ -426,8 +412,16 @@ class DeepQLearningAgent_torch(Agent):
         self.index += 1 # counter used for printing debug info
         return loss.item()
 
-    def update_target_net(self):
-        self.target_net.load_state_dict(self.model.state_dict())
+    def save_model(self, file_path, iteration=None):
+        if iteration is not None:
+            file_path = f"{file_path}_iter_{iteration}"
+        # Save the model
+        torch.save(self.model.state_dict(), file_path)
+
+    def load_model(self, file_path):
+        self.model.load_state_dict(torch.load(file_path))
+        self.model.eval()  # Set the model to evaluation mode
+    
 
 class DeepQLearningAgent(Agent):
     """This agent learns the game via Q learning
